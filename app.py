@@ -15,8 +15,8 @@ def generate_plot_in_background(data, group_by="day"):
 
 @app.route('/scan', methods=['POST'])
 def scan():
-    subreddits = request.json.get('subreddits', ["pennystocks"])
-    days = request.json.get('days', 7)
+    subreddits = request.json.get('subreddits', ["pennystocks", "wallstreetbets"])
+    days = request.json.get('days', 21)
     
     # Fetch data from Reddit
     data = fetch_reddit_data(reddit, subreddits, days)
@@ -41,7 +41,7 @@ def plot():
     group_by = request.args.get('group_by', "day")  # 'day' or 'week'
     
     # Get the top 5 words from the database
-    cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 5")
+    cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 12")
     top_5_words = [word[0] for word in cursor.fetchall()]
     
     # Prepare the data for all top 5 words
@@ -53,7 +53,7 @@ def plot():
     # Run the plotting in the background for all top words
     threading.Thread(target=generate_plots_for_top_words, args=(all_data, group_by)).start()
     
-    return jsonify({"message": "Plot generation for top 5 words is in progress."})
+    return jsonify({"message": "Plot generation for top 6 words is in progress."})
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -39,7 +39,7 @@ def generate_plots_for_top_words(all_data, group_by="day"):
         plt.plot(sorted_dates, counts, marker="o", label=word)
 
     # Customize and display the plot
-    plt.title("Top 5 Most Frequent Words Over Time")
+    plt.title("Top 5 Most Mentioned tickers on r/pennystocks")
     plt.xlabel("Date")
     plt.ylabel("Occurrences")
     plt.legend()
