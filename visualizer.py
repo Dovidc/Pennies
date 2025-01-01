@@ -5,43 +5,27 @@ import matplotlib.pyplot as plt
 def generate_plots_for_top_words(all_data, group_by="day"):
     plt.figure(figsize=(10, 6))
 
-    # For each word in the data, generate a plot line
     for word, data in all_data.items():
-        # Parse timestamps into dates
-        invalid_timestamps = 0
-        dates = []
-        
-        # Try to parse each timestamp
-        for ts in data:
-            try:
-                date = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").date()
-                dates.append(date)
-            except ValueError:
-                invalid_timestamps += 1
-                continue  # Skip invalid timestamps
+        dates = [datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").date() for ts in data]
 
-        if invalid_timestamps > 0:
-            print(f"Found {invalid_timestamps} invalid timestamps for word '{word}'. Skipping.")
-            continue
-
-        # Group by date or week
+        # Group by day or week
         date_counts = defaultdict(int)
         for date in dates:
             if group_by == "week":
-                date = date - timedelta(days=date.weekday())  # Group by week start (Monday)
+                date = date - timedelta(days=date.weekday())
             date_counts[date] += 1
 
-        # Sort dates and counts
+        # Prepare data for plotting
         sorted_dates = sorted(date_counts.keys())
         counts = [date_counts[date] for date in sorted_dates]
 
-        # Plot the data for this word
+        # Plot the data
         plt.plot(sorted_dates, counts, marker="o", label=word)
 
-    # Customize and display the plot
-    plt.title("Top 5 Most Mentioned tickers on r/pennystocks")
+    plt.title("Top 5 Most Mentioned Tickers on r/pennystocks")
     plt.xlabel("Date")
-    plt.ylabel("Occurrences")
+    plt.ylabel("Mentions")
     plt.legend()
     plt.grid()
     plt.show()
+
