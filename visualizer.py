@@ -22,7 +22,7 @@ def generate_plots_for_top_words(all_data, group_by="day"):
         # Plot the data
         plt.plot(sorted_dates, counts, marker="o", label=word)
 
-    plt.title("Top 5 Most Mentioned Tickers on r/pennystocks")
+    plt.title("Top 10 Most Mentioned Tickers on r/pennystocks")
     plt.xlabel("Date")
     plt.ylabel("Mentions")
     plt.legend()
