@@ -1,0 +1,234 @@
+import threading
+from flask import Flask, request, jsonify
+from reddit_scanner import initialize_reddit, fetch_reddit_data
+from db_manager import initialize_db, save_to_db, get_word_data
+from visualizer import generate_plots_for_top_words
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
+
+# Initialize Flask app, database, and Reddit API
+app = Flask(__name__)
+reddit = initialize_reddit()
+
+# Scheduler to automate tasks
+scheduler = BackgroundScheduler()
+
+def automated_data_fetch():
+    """
+    Fetch data from Reddit automatically and save it to the database.
+    """
+    try:
+        print(f"[{datetime.utcnow()}] Automated data fetch started.")
+        subreddits = ["pennystocks"]
+        days = 1  # Fetch data for the last day
+        data = fetch_reddit_data(reddit, subreddits, days)
+        save_to_db(data)  # Updated to handle locking issues
+        print(f"[{datetime.utcnow()}] Data fetch complete.")
+    except Exception as e:
+        print(f"Error during automated data fetch: {e}")
+
+def automated_plot_generation():
+    """
+    Generate the graph automatically based on the latest data.
+    """
+    try:
+        print(f"[{datetime.utcnow()}] Automated graph generation started.")
+        conn, cursor = initialize_db()
+        cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 10")
+        top_words = [word[0] for word in cursor.fetchall()]
+        all_data = {word: get_word_data(word) for word in top_words}
+        generate_plots_for_top_words(all_data)
+        print(f"[{datetime.utcnow()}] Graph generation complete.")
+    except Exception as e:
+        print(f"Error during automated graph generation: {e}")
+
+# Schedule automated tasks
+scheduler.add_job(automated_data_fetch, 'interval', hours=1)  # Fetch data every hour
+scheduler.start()
+
+@app.route('/scan', methods=['POST'])
+def scan():
+    subreddits = ["pennystocks"]  # Only scan r/pennystocks
+    days = request.json.get('days', 7)  # Default to 7 days if not provided
+    
+    # Fetch data from Reddit
+    data = fetch_reddit_data(reddit, subreddits, days)
+    
+    # Save to the database
+    save_to_db(data)  # Updated to handle locking issues
+    
+    # Return a summary of top words detected
+    word_frequencies = {word: len(timestamps) for word, timestamps in data.items()}
+    top_words = sorted(word_frequencies.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    return jsonify({
+        "message": "Scan complete!",
+        "top_words": top_words
+    })
+
+@app.route('/plot', methods=['GET'])
+def plot():
+    group_by = request.args.get('group_by', "day")  # 'day' or 'week'
+    
+    # Get the top 10 words from the database
+    conn, cursor = initialize_db()
+    cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 10")
+    top_words = [word[0] for word in cursor.fetchall()]
+    
+    # Prepare the data for plotting
+    all_data = {word: get_word_data(word) for word in top_words}
+    threading.Thread(target=generate_plots_for_top_words, args=(all_data, group_by)).start()
+    
+    return jsonify({"message": "Plot generation in progress."})
+
+if __name__ == "__main__":
+    print("Starting server and scheduler...")
+    app.run(debug=True)
+
+
+
+import sqlite3
+import time
+
+# Initialize database
+def initialize_db():
+    conn = sqlite3.connect("reddit_data.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS word_data (
+            word TEXT,
+            timestamp TEXT,
+            UNIQUE(word, timestamp)  -- Prevent duplicate entries
+        )
+    """)
+    conn.commit()
+    return conn, cursor
+
+# Save word occurrences to the database
+def save_to_db(data):
+    retries = 5  # Number of retry attempts
+    delay = 0.5  # Delay between retries
+
+    conn, cursor = initialize_db()  # Always use a new connection per thread
+    try:
+        for attempt in range(retries):
+            try:
+                for word, timestamps in data.items():
+                    for timestamp in timestamps:
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO word_data (word, timestamp)
+                            VALUES (?, ?)
+                        """, (word, timestamp))
+                conn.commit()
+                break  # Exit loop if successful
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < retries - 1:
+                    print(f"Database is locked, retrying... (Attempt {attempt + 1})")
+                    time.sleep(delay)  # Wait before retrying
+                else:
+                    raise  # Re-raise the exception if retries fail
+    finally:
+        cursor.close()  # Close the cursor after all operations are done
+        conn.close()    # Close the connection after all operations are done
+
+# Retrieve data for a specific word
+def get_word_data(word):
+    conn, cursor = initialize_db()
+    try:
+        cursor.execute("SELECT timestamp FROM word_data WHERE word = ?", (word,))
+        data = [timestamp[0] for timestamp in cursor.fetchall()]
+    finally:
+        cursor.close()
+        conn.close()  # Close the connection to avoid locks
+    return data
+
+
+
+ import praw
+import re
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+# Initialize Reddit API
+def initialize_reddit():
+    return praw.Reddit(
+        client_id="rIAs8ccsw-b7WTS5iWYJrg",
+        client_secret="LOqxTB2SqPxGHNQy0c15NNOv60O-yw",
+        user_agent="Reddit Word Tracker v1"
+    )
+
+# Fetch data from Reddit
+def fetch_reddit_data(reddit, subreddits, days_to_scan):
+    """
+    Fetch Reddit data for specified subreddits and days.
+    Finds words matching the pattern (all-caps, 3-5 characters) in titles and comments.
+
+    Args:
+        reddit: Initialized Reddit instance.
+        subreddits: List of subreddit names to fetch data from.
+        days_to_scan: Number of days to look back.
+
+    Returns:
+        A dictionary where keys are words and values are lists of timestamps.
+    """
+    word_occurrences = defaultdict(set)  # Use a set to ensure unique timestamps
+    pattern = r'\b[A-Z]{3,5}\b'  # Match all-cap words (3-5 characters)
+    start_time = datetime.utcnow() - timedelta(days=days_to_scan)
+
+    for subreddit_name in subreddits:
+        subreddit = reddit.subreddit(subreddit_name)
+        for post in subreddit.new(limit=100):  # Adjust limit for performance
+            post_time = datetime.utcfromtimestamp(post.created_utc)
+            if post_time > start_time:
+                # Extract words from the post title
+                words_in_title = re.findall(pattern, post.title)
+                for word in words_in_title:
+                    word_occurrences[word].add(post_time)
+
+                # Extract words from the comments
+                try:
+                    post.comments.replace_more(limit=0)
+                    for comment in post.comments.list():
+                        comment_time = datetime.utcfromtimestamp(comment.created_utc)
+                        if comment_time > start_time:
+                            words_in_comment = re.findall(pattern, comment.body)
+                            for word in words_in_comment:
+                                word_occurrences[word].add(comment_time)
+                except Exception as e:
+                    print(f"Error processing comments for post '{post.title}': {e}")
+
+    # Convert sets back to lists for saving to the database
+    return {word: list(timestamps) for word, timestamps in word_occurrences.items()}
+   
+
+   from collections import defaultdict
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+
+def generate_plots_for_top_words(all_data, group_by="day"):
+    plt.figure(figsize=(10, 6))
+
+    for word, data in all_data.items():
+        dates = [datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").date() for ts in data]
+
+        # Group by day or week
+        date_counts = defaultdict(int)
+        for date in dates:
+            if group_by == "week":
+                date = date - timedelta(days=date.weekday())
+            date_counts[date] += 1
+
+        # Prepare data for plotting
+        sorted_dates = sorted(date_counts.keys())
+        counts = [date_counts[date] for date in sorted_dates]
+
+        # Plot the data
+        plt.plot(sorted_dates, counts, marker="o", label=word)
+
+    plt.title("Top 5 Most Mentioned Tickers on r/pennystocks")
+    plt.xlabel("Date")
+    plt.ylabel("Mentions")
+    plt.legend()
+    plt.grid()
+    plt.show()
+

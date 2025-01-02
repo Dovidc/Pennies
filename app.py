@@ -34,7 +34,7 @@ def automated_plot_generation():
     try:
         print(f"[{datetime.utcnow()}] Automated graph generation started.")
         conn, cursor = initialize_db()
-        cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 10")
+        cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 15")
         top_words = [word[0] for word in cursor.fetchall()]
         all_data = {word: get_word_data(word) for word in top_words}
         generate_plots_for_top_words(all_data)
@@ -59,7 +59,7 @@ def scan():
     
     # Return a summary of top words detected
     word_frequencies = {word: len(timestamps) for word, timestamps in data.items()}
-    top_words = sorted(word_frequencies.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_words = sorted(word_frequencies.items(), key=lambda x: x[1], reverse=True)[:15]
     
     return jsonify({
         "message": "Scan complete!",
@@ -72,7 +72,7 @@ def plot():
     
     # Get the top 10 words from the database
     conn, cursor = initialize_db()
-    cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 10")
+    cursor.execute("SELECT word FROM word_data GROUP BY word ORDER BY COUNT(*) DESC LIMIT 15")
     top_words = [word[0] for word in cursor.fetchall()]
     
     # Prepare the data for plotting
